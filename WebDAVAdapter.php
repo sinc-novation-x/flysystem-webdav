@@ -37,6 +37,11 @@ use function ltrim;
 
 class WebDAVAdapter implements FilesystemAdapter
 {
+    private Client $client;
+    private string $visibilityHandling;
+    private bool $manualCopy;
+    private bool $manualMove;
+
     public const ON_VISIBILITY_THROW_ERROR = 'throw';
     public const ON_VISIBILITY_IGNORE = 'ignore';
     public const FIND_PROPERTIES = [
@@ -51,13 +56,17 @@ class WebDAVAdapter implements FilesystemAdapter
     private PathPrefixer $prefixer;
 
     public function __construct(
-        private Client $client,
+        Client $client,
         string $prefix = '',
-        private string $visibilityHandling = self::ON_VISIBILITY_THROW_ERROR,
-        private bool $manualCopy = false,
-        private bool $manualMove = false,
+        string $visibilityHandling = self::ON_VISIBILITY_THROW_ERROR,
+        bool $manualCopy = false,
+        bool $manualMove = false
     ) {
         $this->prefixer = new PathPrefixer($prefix);
+        $this->client = $client;
+        $this->visibilityHandling = $visibilityHandling;
+        $this->manualCopy = $manualCopy;
+        $this->manualMove = $manualMove;
     }
 
     public function fileExists(string $path): bool
@@ -118,7 +127,7 @@ class WebDAVAdapter implements FilesystemAdapter
     /**
      * @param resource|string $contents
      */
-    private function upload(string $path, mixed $contents): void
+    private function upload(string $path, $contents): void
     {
         $this->createParentDirFor($path);
         $location = $this->prefixer->prefixPath($this->encodePath($path));
@@ -249,21 +258,21 @@ class WebDAVAdapter implements FilesystemAdapter
     {
         $mimeType = (string) $this->propFind($path, 'mime_type', '{DAV:}getcontenttype');
 
-        return new FileAttributes($path, mimeType: $mimeType);
+        return new FileAttributes($path, null, null, null, $mimeType);
     }
 
     public function lastModified(string $path): FileAttributes
     {
         $lastModified = $this->propFind($path, 'last_modified', '{DAV:}getlastmodified');
 
-        return new FileAttributes($path, lastModified: strtotime($lastModified));
+        return new FileAttributes($path, null, null, strtotime($lastModified));
     }
 
     public function fileSize(string $path): FileAttributes
     {
         $fileSize = (int) $this->propFind($path, 'file_size', '{DAV:}getcontentlength');
 
-        return new FileAttributes($path, fileSize: $fileSize);
+        return new FileAttributes($path, $fileSize);
     }
 
     public function listContents(string $path, bool $deep): iterable
@@ -277,7 +286,7 @@ class WebDAVAdapter implements FilesystemAdapter
             $object = $this->normalizeObject($object);
 
             if ($this->propsIsDirectory($object)) {
-                yield new DirectoryAttributes($path, lastModified: $object['last_modified'] ?? null);
+                yield new DirectoryAttributes($path, null ,$object['last_modified'] ?? null);
 
                 if ( ! $deep) {
                     continue;
@@ -289,9 +298,10 @@ class WebDAVAdapter implements FilesystemAdapter
             } else {
                 yield new FileAttributes(
                     $path,
-                    fileSize:     $object['file_size'] ?? null,
-                    lastModified: $object['last_modified'] ?? null,
-                    mimeType:     $object['mime_type'] ?? null,
+                    $object['file_size'] ?? null,
+                    null,
+                    $object['last_modified'] ?? null,
+                    $object['mime_type'] ?? null,
                 );
             }
         }
@@ -421,7 +431,7 @@ class WebDAVAdapter implements FilesystemAdapter
         $this->createDirectory($dirname, new Config());
     }
 
-    private function propFind(string $path, string $section, string $property): mixed
+    private function propFind(string $path, string $section, string $property)
     {
         $location = $this->prefixer->prefixPath($path);
 
